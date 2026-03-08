@@ -75,6 +75,55 @@ def insert_plate(
         conn.close()
 
 
+def get_all_rows() -> list[dict[str, Any]]:
+    """Все записи из БД (id, plate, source_channel, sender, message, message_link, date)."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "SELECT id, plate, source_channel, sender, message, message_link, date FROM plates"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
+def delete_by_ids(ids: list[int]) -> int:
+    """Удалить записи по списку id. Возвращает количество удалённых."""
+    if not ids:
+        return 0
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(ids))
+        cursor = conn.execute(
+            f"DELETE FROM plates WHERE id IN ({placeholders})",
+            tuple(ids),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def delete_plates(plates: set[str]) -> int:
+    """
+    Удалить из БД все записи с номерами из множества plates.
+    Возвращает количество удалённых строк.
+    """
+    if not plates:
+        return 0
+    conn = get_connection()
+    try:
+        placeholders = ",".join("?" * len(plates))
+        cursor = conn.execute(
+            f"DELETE FROM plates WHERE plate IN ({placeholders})",
+            tuple(plates),
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def append_to_csv(row: dict[str, Any]) -> None:
     """
     Append a single record to the CSV file.

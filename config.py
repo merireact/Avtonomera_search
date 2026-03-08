@@ -37,10 +37,19 @@ BOT_TOKEN = get_env("BOT_TOKEN")
 NOTIFICATION_CHAT_ID = get_env("NOTIFICATION_CHAT_ID")
 
 # --- List of channel/group usernames or IDs to monitor ---
-# Add channel usernames (e.g. "channelname") or numeric IDs (e.g. -1001234567890)
 CHANNELS_TO_MONITOR: list[str] = [
-    # Example: "autosale_channel",
-    # -1001234567890,
+    "vipavtonomer",
+    "NomeraMsk77",
+    "Avtorynok_moskva_24",
+    "nomer_auto_77",
+    "Avtonomerarus",
+    "spec_nomera",
+    "avto_nomer_rus",
+    "grz_msk",
+    "avtonomeraru",
+    "autonomeraa777",
+    "+Pl4V4GCOFV45MDIy",  # invite link t.me/+...
+    "avtonomera777_77",
 ]
 
 def _normalize_channel(s: str) -> str:
@@ -83,3 +92,43 @@ GOOGLE_SHEET_NAME = get_env("GOOGLE_SHEET_NAME") or "Номера"
 
 # How many last messages to scan per channel on startup (0 = only new messages)
 SCAN_LAST_MESSAGES = int(get_env("SCAN_LAST_MESSAGES") or "50")
+# По сколько сообщений брать с каждого канала за один «круг» (чтобы номера шли вперемешку: 5 с канала 1, 5 с канала 2, ...)
+SCAN_BATCH_PER_CHANNEL = int(get_env("SCAN_BATCH_PER_CHANNEL") or "5")
+
+# --- Фильтрация перекупов ---
+# Сообщения длиннее этого символа не используем (длинные списки с ценами — перекупы)
+MAX_MESSAGE_LENGTH_FOR_PLATES = int(get_env("MAX_MESSAGE_LENGTH_FOR_PLATES") or "350")
+
+# Аккаунты перекупов: номера из их сообщений не добавляем в таблицу
+BLOCKED_SENDERS: list[str] = [
+    "autonomera777rus",
+    "AUTOMOBILE_77",
+    "Avtonomer55555",
+    "rusnumberadmin",
+    "Nidm77",
+    "nomer77rus",
+    "todor77",
+    "zmeyhunter77",
+    "ildar_r_k",
+    "ExclusivepriceMSK",
+    "nomera_avto99",
+    "firmap",
+    "ironchik15",
+    "rozarenov",
+    "Avtonoomerolog",
+    "vipavtonomer",
+    "autonomeraa777",
+    "krllzvlv",
+    "ironchik15",
+
+]
+
+# Номера из списков перекупов — удалить из таблицы и не добавлять (нормализованы: без пробелов, верхний регистр)
+BLOCKED_PLATES: set[str] = {
+    "С869ЕР977", "В796РС797", "С763ЕР977", "С852ЕР977", "Е443КР977", "Е392КР977",
+    "Е637КР977", "Е121АО797", "А771СА797", "Е704КР977", "Н367ОО797", "В434СЕ797",
+    "К343ХХ797", "Х345УС797", "Т051ЕН977", "Т042ЕН977", "У191КУ977", "У474СН797",
+    "Т075ЕН977", "Т171РЕ797", "Е022УО797", "Т959УВ797", "Н454РТ797", "С780ЕР977",
+    "С980ЕР977", "Т191ХУ797", "У606ХН797", "А079МВ977", "К101ХВ797", "М765АХ977",
+    "М202ТА799", "Р471УС197", "Е667КР977", "А090ТК",
+}

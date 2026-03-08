@@ -15,11 +15,16 @@ from telethon import TelegramClient
 from telethon.events import NewMessage
 import config
 from database import append_to_csv, init_database, insert_plate
+from filters import is_blocked_sender, is_reseller_list_message, is_message_too_long
 from plate_detector import find_plates
 from sheets import append_plate_row
 
 # Set up logging for the monitor
 logger = logging.getLogger("telegram_monitor")
+
+# Один общий клиент бота для уведомлений (избегаем database is locked при нескольких номерах подряд)
+_bot_client: Optional[TelegramClient] = None
+_notification_lock = asyncio.Lock()
 
 
 def _get_message_text(msg) -> str:
@@ -63,34 +68,29 @@ def _build_message_link(chat, msg_id: int) -> str:
 async def _send_notification(plate: str, channel: str, message_link: str) -> None:
     """
     Send a Telegram notification to the configured chat via the bot.
+    Uses one shared bot client to avoid 'database is locked' when many plates are found at once.
     """
     if not config.BOT_TOKEN or not config.NOTIFICATION_CHAT_ID:
-        logger.warning("BOT_TOKEN or NOTIFICATION_CHAT_ID not set; skipping notification.")
+        return
+    global _bot_client
+    if _bot_client is None:
         return
 
-    try:
-        # Use a separate client for the bot (only for sending)
-        bot = TelegramClient(
-            "bot_session",
-            config.API_ID,
-            config.API_HASH,
-        )
-        await bot.start(bot_token=config.BOT_TOKEN)
+    text = (
+        "New plate found\n"
+        f"Plate: {plate}\n"
+        f"Channel: {channel}\n"
+        f"Link: {message_link}"
+    )
+    chat_id = config.NOTIFICATION_CHAT_ID
+    if chat_id.lstrip("-").isdigit():
+        chat_id = int(chat_id)
 
-        text = (
-            "New plate found\n"
-            f"Plate: {plate}\n"
-            f"Channel: {channel}\n"
-            f"Link: {message_link}"
-        )
-        chat_id = config.NOTIFICATION_CHAT_ID
-        # Support both numeric ID and @username
-        if chat_id.lstrip("-").isdigit():
-            chat_id = int(chat_id)
-        await bot.send_message(chat_id, text)
-        await bot.disconnect()
-    except Exception as e:
-        logger.exception("Failed to send Telegram notification: %s", e)
+    async with _notification_lock:
+        try:
+            await _bot_client.send_message(chat_id, text)
+        except Exception as e:
+            logger.exception("Failed to send Telegram notification: %s", e)
 
 
 async def _send_startup_test() -> None:
@@ -99,27 +99,20 @@ async def _send_startup_test() -> None:
     So you can verify NOTIFICATION_CHAT_ID and Sheets access right after start.
     """
     if config.BOT_TOKEN and config.NOTIFICATION_CHAT_ID:
-        try:
-            bot = TelegramClient(
-                "bot_startup_test",
-                config.API_ID,
-                config.API_HASH,
-            )
-            await bot.start(bot_token=config.BOT_TOKEN)
-            chat_id = config.NOTIFICATION_CHAT_ID
-            if chat_id.lstrip("-").isdigit():
-                chat_id = int(chat_id)
-            await bot.send_message(
-                chat_id,
-                "Монитор запущен. Ожидаю новые сообщения в каналах. Когда в канале появится сообщение с номером — пришлю уведомление сюда.",
-            )
-            await bot.disconnect()
-            logger.info("Startup test: message sent to bot (check your Telegram).")
-        except Exception as e:
-            logger.error(
-                "Startup test: could not send message to bot. Check NOTIFICATION_CHAT_ID (must be YOUR chat ID, not bot ID) and that you have sent /start to the bot. Error: %s",
-                e,
-            )
+        if _bot_client is not None:
+            try:
+                chat_id = config.NOTIFICATION_CHAT_ID
+                if chat_id.lstrip("-").isdigit():
+                    chat_id = int(chat_id)
+                await _bot_client.send_message(
+                    chat_id,
+                    "Монитор запущен. Ожидаю новые сообщения в каналах. Когда в канале появится сообщение с номером — пришлю уведомление сюда.",
+                )
+                logger.info("Startup test: message sent to bot (check your Telegram).")
+            except Exception as e:
+                logger.error("Startup test: could not send message to bot: %s", e)
+        else:
+            logger.warning("Bot client not started; startup test message skipped.")
     else:
         logger.warning("BOT_TOKEN or NOTIFICATION_CHAT_ID not set; bot notifications disabled.")
 
@@ -154,11 +147,27 @@ def _process_message(
     """
     Process one message: find plates, avoid duplicates, save to DB/CSV,
     and send notification for each newly stored plate.
+    Не добавляем номера: от перекупов (BLOCKED_SENDERS), из длинных списков,
+    из сообщений в формате «СПИСОК / ЦЕНА БЕЗ ОФОРМЛЕНИЯ», и из BLOCKED_PLATES.
     """
     text = _get_message_text(msg)
+    if is_blocked_sender(sender_username):
+        logger.debug("Пропуск сообщения от перекупа: %s", sender_username)
+        return
+    if is_message_too_long(text):
+        logger.debug("Пропуск длинного сообщения (%d символов)", len(text))
+        return
+    if is_reseller_list_message(text):
+        logger.debug("Пропуск сообщения в формате списка перекупов (номера с ценами)")
+        return
+
     plates = find_plates(text)
 
     for plate in plates:
+        # Не добавляем номера из чёрного списка (уже попавшие из перекупов)
+        if plate in config.BLOCKED_PLATES:
+            logger.debug("Пропуск номера из чёрного списка: %s", plate)
+            continue
         inserted = insert_plate(
             plate=plate,
             source_channel=channel_name,
@@ -236,8 +245,27 @@ async def _process_one_message(
     )
 
 
+def _interleave_message_lists(channel_messages: list[list]) -> list[tuple]:
+    """
+    Порядок обработки: по 5 сообщений с канала 0, потом 5 с канала 1, ..., затем снова 5 с канала 0, и т.д.
+    Возвращает список (entity_index, message).
+    """
+    batch = getattr(config, "SCAN_BATCH_PER_CHANNEL", 5) or 5
+    result = []
+    max_len = max(len(msgs) for msgs in channel_messages) if channel_messages else 0
+    for start in range(0, max_len, batch):
+        for ch_index, msgs in enumerate(channel_messages):
+            for i in range(start, min(start + batch, len(msgs))):
+                result.append((ch_index, msgs[i]))
+    return result
+
+
 async def _scan_recent_messages(client: TelegramClient, channels_resolved: list) -> None:
-    """Fetch last N messages from each channel and process them (find plates, save, notify)."""
+    """
+    Загружаем последние N сообщений с каждого канала, затем обрабатываем их
+    поочерёдно: по SCAN_BATCH_PER_CHANNEL (например 5) с канала 1, потом 5 с канала 2, и т.д.,
+    чтобы номера в таблицу попадали вперемешку со всех каналов.
+    """
     limit = getattr(config, "SCAN_LAST_MESSAGES", 50) or 0
     if limit <= 0:
         return
@@ -245,33 +273,45 @@ async def _scan_recent_messages(client: TelegramClient, channels_resolved: list)
     if not channels_resolved:
         return
 
-    logger.info("Сканирую последние %d сообщений в каждом канале...", limit)
+    logger.info(
+        "Сканирую последние %d сообщений в каждом канале (по %d за круг, вперемешку)...",
+        limit,
+        getattr(config, "SCAN_BATCH_PER_CHANNEL", 5),
+    )
+    channel_messages: list[list] = []
     for entity in channels_resolved:
         try:
-            channel_name = getattr(entity, "title", None) or "unknown"
             messages = await client.get_messages(entity, limit=limit)
-            for msg in messages:
-                if not msg or not msg.id:
-                    continue
-                message_link = _build_message_link(entity, msg.id)
-                date_str = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else ""
-                sender = await msg.get_sender()
-                sender_username = _get_sender_username(sender)
-                text = _get_message_text(msg)
-                plates = find_plates(text)
-                if plates:
-                    logger.info("В истории «%s»: найдено номеров %d в сообщении %s", channel_name, len(plates), msg.id)
-                await _process_one_message(
-                    client,
-                    msg,
-                    entity,
-                    channel_name,
-                    message_link,
-                    date_str,
-                    sender_username,
-                )
+            msgs_list = [m for m in messages if m and getattr(m, "id", None)]
+            channel_messages.append(msgs_list)
         except Exception as e:
-            logger.warning("Ошибка при сканировании канала %s: %s", getattr(entity, "title", entity), e)
+            logger.warning("Ошибка при загрузке канала %s: %s", getattr(entity, "title", entity), e)
+            channel_messages.append([])
+
+    interleaved = _interleave_message_lists(channel_messages)
+    for ch_index, msg in interleaved:
+        entity = channels_resolved[ch_index]
+        channel_name = getattr(entity, "title", None) or "unknown"
+        if not msg or not msg.id:
+            continue
+        message_link = _build_message_link(entity, msg.id)
+        date_str = msg.date.strftime("%Y-%m-%d %H:%M:%S") if msg.date else ""
+        sender = await msg.get_sender()
+        sender_username = _get_sender_username(sender)
+        text = _get_message_text(msg)
+        plates = find_plates(text)
+        if plates:
+            logger.info("В истории «%s»: найдено номеров %d в сообщении %s", channel_name, len(plates), msg.id)
+        await _process_one_message(
+            client,
+            msg,
+            entity,
+            channel_name,
+            message_link,
+            date_str,
+            sender_username,
+        )
+
     logger.info("Сканирование истории завершено. Ожидаю новые сообщения...")
 
 
@@ -329,6 +369,21 @@ async def run_monitor() -> None:
             _handle_new_message,
             NewMessage(chats=[entity]),
         )
+
+    # Один раз поднимаем клиента бота для уведомлений (избегаем database is locked)
+    global _bot_client
+    if config.BOT_TOKEN and config.NOTIFICATION_CHAT_ID:
+        try:
+            _bot_client = TelegramClient(
+                str(config.PROJECT_ROOT / "bot_session"),
+                config.API_ID,
+                config.API_HASH,
+            )
+            await _bot_client.start(bot_token=config.BOT_TOKEN)
+            logger.info("Bot client for notifications is ready.")
+        except Exception as e:
+            logger.warning("Could not start bot for notifications: %s", e)
+            _bot_client = None
 
     await _send_startup_test()
 
