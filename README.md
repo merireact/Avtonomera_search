@@ -101,7 +101,7 @@ config.py            # Env vars and channel list
    **Как узнать свой Chat ID:**
    - Напишите в Telegram боту [@userinfobot](https://t.me/userinfobot) — он пришлёт ваш **Id** (например, `123456789`). Это и есть `NOTIFICATION_CHAT_ID`.
    - Либо напишите что-то своему боту (например, «привет»), затем откройте в браузере (подставьте свой токен):  
-     `https://api.telegram.org/bot8714833254:AAFCx7wUVRKt-CbjC8IGqoSLm2dRlARWIxo/getUpdates`  
+     `https://api.telegram.org/bot8ARWIxo/getUpdates`  
      В ответе найдите `"chat":{"id": 123456789}` — это ваш Chat ID.
 
    В `.env` пропишите:  
