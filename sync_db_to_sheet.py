@@ -12,6 +12,7 @@
 import time
 import config
 from database import get_all_rows
+from plate_detector import get_region_code
 from sheets import get_existing_plate_links, append_plate_row, _norm_plate
 
 
@@ -34,6 +35,8 @@ def main() -> None:
         plate = (r.get("plate") or "").strip()
         link = (r.get("message_link") or "").strip()
         if not plate:
+            continue
+        if get_region_code(plate) not in config.ALLOWED_REGION_CODES:
             continue
         key = (_norm_plate(plate), link)
         if key not in existing:

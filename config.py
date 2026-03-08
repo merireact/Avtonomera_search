@@ -99,7 +99,7 @@ SCAN_BATCH_PER_CHANNEL = int(get_env("SCAN_BATCH_PER_CHANNEL") or "5")
 # Сообщения длиннее этого символа не используем (длинные списки с ценами — перекупы)
 MAX_MESSAGE_LENGTH_FOR_PLATES = int(get_env("MAX_MESSAGE_LENGTH_FOR_PLATES") or "350")
 
-# Аккаунты перекупов: номера из их сообщений не добавляем в таблицу
+# Аккаунты перекупов (чёрный список): номера из их сообщений не добавляем в таблицу
 BLOCKED_SENDERS: list[str] = [
     "autonomera777rus",
     "AUTOMOBILE_77",
@@ -119,9 +119,34 @@ BLOCKED_SENDERS: list[str] = [
     "vipavtonomer",
     "autonomeraa777",
     "krllzvlv",
-    "ironchik15",
-
+    "PrimeAvtonomer",
+    "Avtonomera500",
+    "Cardealers_77",
+    "autoyurist",
+    "Phantomi85",
+    "zverev023",
+    "Ruslan_lev77",
+    "aleksei_minakov",
+    # Дополнительно добавленные перекупы
+    "zverev023",
+    "Avtonoomerolog",
+    "avtonomeramarket",
+    "Vasilii_Fomkin",
+    "pavlov_prod",
 ]
+
+# --- Фильтр по региону: только Москва и Московская область ---
+# Коды региона в конце номера (2–3 цифры). Номера с другими регионами не добавляем и не ищем.
+# Москва
+MOSCOW_REGION_CODES: tuple[str, ...] = (
+    "77", "97", "99", "177", "197", "199", "777", "797", "799", "977",
+)
+# Московская область
+MOSCOW_OBLAST_REGION_CODES: tuple[str, ...] = (
+    "50", "90", "150", "190", "750", "790", "250", "550",
+)
+# Все разрешённые коды (Москва + МО) — для быстрой проверки
+ALLOWED_REGION_CODES: frozenset[str] = frozenset(MOSCOW_REGION_CODES) | frozenset(MOSCOW_OBLAST_REGION_CODES)
 
 # Номера из списков перекупов — удалить из таблицы и не добавлять (нормализованы: без пробелов, верхний регистр)
 BLOCKED_PLATES: set[str] = {

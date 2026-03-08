@@ -16,7 +16,7 @@ from telethon.events import NewMessage
 import config
 from database import append_to_csv, init_database, insert_plate
 from filters import is_blocked_sender, is_reseller_list_message, is_message_too_long
-from plate_detector import find_plates
+from plate_detector import find_plates, get_region_code
 from sheets import append_plate_row
 
 # Set up logging for the monitor
@@ -167,6 +167,11 @@ def _process_message(
         # Не добавляем номера из чёрного списка (уже попавшие из перекупов)
         if plate in config.BLOCKED_PLATES:
             logger.debug("Пропуск номера из чёрного списка: %s", plate)
+            continue
+        # Только Москва и Московская область: не добавляем номера с другими кодами региона
+        region = get_region_code(plate)
+        if region is None or region not in config.ALLOWED_REGION_CODES:
+            logger.debug("Пропуск номера (регион не Москва/МО): %s (код %s)", plate, region)
             continue
         inserted = insert_plate(
             plate=plate,

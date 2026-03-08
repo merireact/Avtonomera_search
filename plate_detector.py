@@ -41,6 +41,21 @@ def _normalize_plate(raw: str) -> str:
     return cleaned
 
 
+def get_region_code(plate: str) -> str | None:
+    """
+    Извлечь код региона из номера (последние 2 или 3 цифры).
+    Номер должен быть нормализован (без пробелов, верхний регистр).
+    Примеры: А771СА797 -> 797, В123СТ77 -> 77.
+    """
+    if not plate or not plate[-1].isdigit():
+        return None
+    i = len(plate) - 1
+    while i >= 0 and plate[i].isdigit():
+        i -= 1
+    digits = plate[i + 1 :]
+    return digits if len(digits) in (2, 3) else None
+
+
 def _looks_like_plate(s: str) -> bool:
     """Отсекаем очевидные не-номера (только цифры, слишком короткие и т.д.)."""
     if len(s) < 6 or len(s) > 12:
