@@ -1,0 +1,14 @@
+# Secrets
+.env
+google_credentials.json
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.db
+plates.csv
+
+# Session
+telegram_session*
+*.session

@@ -1,0 +1,9 @@
+# Telegram API client
+telethon>=1.34.0
+
+# Optional: load .env file for API_ID, API_HASH, BOT_TOKEN
+python-dotenv>=1.0.0
+
+# Google Sheets (optional)
+gspread>=6.0.0
+google-auth>=2.0.0
