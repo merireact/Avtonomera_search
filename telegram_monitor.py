@@ -18,6 +18,15 @@ from database import append_to_csv, init_database, insert_plate
 from filters import is_blocked_sender, is_reseller_list_message, is_message_too_long
 from plate_detector import find_plates, get_region_code
 from sheets import append_plate_row
+from phone_utils import extract_first_phone, extract_first_username
+
+# Каналы, которых не считаем «контактным отправителем» (по ним не пишем в личку)
+IGNORED_SENDER_USERNAMES: set[str] = {
+    "@runomer",
+    "@regznak",
+    "@avtonomera_moskva",
+}
+from phone_utils import extract_first_phone
 
 # Set up logging for the monitor
 logger = logging.getLogger("telegram_monitor")
@@ -162,6 +171,16 @@ def _process_message(
         return
 
     plates = find_plates(text)
+    phone_for_sheet = extract_first_phone(text)
+    # Если в тексте есть @username — считаем его контактным.
+    # Если нет — берём отправителя, но только если он не из списка каналов.
+    text_username = extract_first_username(text)
+    if text_username:
+        contact_username = text_username
+    elif sender_username and sender_username not in IGNORED_SENDER_USERNAMES:
+        contact_username = sender_username
+    else:
+        contact_username = None
 
     for plate in plates:
         # Не добавляем номера из чёрного списка (уже попавшие из перекупов)
@@ -176,7 +195,7 @@ def _process_message(
         inserted = insert_plate(
             plate=plate,
             source_channel=channel_name,
-            sender=sender_username,
+            sender=contact_username,
             message=text,
             message_link=message_link,
             date=date_str,
@@ -185,10 +204,11 @@ def _process_message(
             row = {
                 "plate": plate,
                 "source_channel": channel_name,
-                "sender": sender_username or "",
+                "sender": contact_username or "",
                 "message": text,
                 "message_link": message_link,
                 "date": date_str,
+                "phone": phone_for_sheet or "",
             }
             append_to_csv(row)
             append_plate_row(row)

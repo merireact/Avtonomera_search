@@ -50,6 +50,14 @@ CHANNELS_TO_MONITOR: list[str] = [
     "autonomeraa777",
     "+Pl4V4GCOFV45MDIy",  # invite link t.me/+...
     "avtonomera777_77",
+    "runomer",
+    "GosNomeraRF",
+    "regznak",
+    "avtonomera_moskva",
+    "+UMr3VKUxAE0yZWJi",
+    "+Pl4V4GCOFV45MDIy",
+    "Avtonomerarus",
+    "snomerami",
 ]
 
 def _normalize_channel(s: str) -> str:
@@ -90,8 +98,9 @@ GOOGLE_SPREADSHEET_ID = get_env("GOOGLE_SPREADSHEET_ID")
 # Sheet (tab) name inside the spreadsheet, default first sheet
 GOOGLE_SHEET_NAME = get_env("GOOGLE_SHEET_NAME") or "Номера"
 
-# How many last messages to scan per channel on startup (0 = only new messages)
-SCAN_LAST_MESSAGES = int(get_env("SCAN_LAST_MESSAGES") or "50")
+# How many last messages to scan per channel on startup (0 = only new messages).
+# Больше значение — больше старых номеров попадёт в таблицу (удобно ночью, когда новых постов мало).
+SCAN_LAST_MESSAGES = int(get_env("SCAN_LAST_MESSAGES") or "200")
 # По сколько сообщений брать с каждого канала за один «круг» (чтобы номера шли вперемешку: 5 с канала 1, 5 с канала 2, ...)
 SCAN_BATCH_PER_CHANNEL = int(get_env("SCAN_BATCH_PER_CHANNEL") or "5")
 
@@ -133,6 +142,7 @@ BLOCKED_SENDERS: list[str] = [
     "avtonomeramarket",
     "Vasilii_Fomkin",
     "pavlov_prod",
+    "LuckyDo1",
 ]
 
 # --- Фильтр по региону: только Москва и Московская область ---

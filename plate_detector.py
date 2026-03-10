@@ -8,37 +8,66 @@ Supports formats with/without spaces/dashes and with/without region letter.
 import re
 from typing import List
 
-# Optional separator between groups (space, dash, dot, comma, slash)
 _SEP = r"[\s\-\.\,\/]*"
 
-# 1 letter (region) + 3 digits + 2 letters + 2 or 3 digits — основной формат
-# Примеры: A777AA77, В123СТ77, а 123 вс 77
+# Карта похожих латинских букв в русские,
+# чтобы в результате всегда были русские буквы (А, В, М, Т, У, Х и т.д.).
+_LATIN_TO_CYR = str.maketrans(
+    {
+        "A": "А",
+        "B": "В",
+        "E": "Е",
+        "K": "К",
+        "M": "М",
+        "H": "Н",
+        "O": "О",
+        "P": "Р",
+        "C": "С",
+        "T": "Т",
+        "Y": "У",
+        "X": "Х",
+    }
+)
+
 PATTERN_FULL = re.compile(
     r"[A-ZА-Яa-zа-я]" + _SEP + r"\d{3}" + _SEP + r"[A-ZА-Яa-zа-я]{2}" + _SEP + r"\d{2,3}",
     re.UNICODE,
 )
 
-# 3 digits + 2 letters + 2 or 3 digits — без первой буквы региона
-# Примеры: 777АА77, 123СТ77
 PATTERN_NO_REGION = re.compile(
     r"\b\d{3}" + _SEP + r"[A-ZА-Яa-zа-я]{2}" + _SEP + r"\d{2,3}\b",
     re.UNICODE,
 )
 
-# 1 letter + 3 digits + 2 letters + 2 digits — строго 2 цифры в конце (часто в тексте)
 PATTERN_STRICT_END = re.compile(
     r"\b[A-ZА-Яa-zа-я]" + _SEP + r"\d{3}" + _SEP + r"[A-ZА-Яa-zа-я]{2}" + _SEP + r"\d{2}\b",
     re.UNICODE,
 )
 
-# Все паттерны по порядку (сначала полный, потом без региона)
 ALL_PATTERNS = [PATTERN_FULL, PATTERN_NO_REGION, PATTERN_STRICT_END]
 
 
 def _normalize_plate(raw: str) -> str:
-    """Убираем пробелы/дефисы и приводим к одному регистру."""
-    cleaned = re.sub(r"[\s\-\.]+", "", raw).upper()
+    """
+    Убираем пробелы/дефисы, приводим к верхнему регистру
+    и переводим похожие латинские буквы в русские.
+    """
+    cleaned = re.sub(r"[\s\-\.]+", "", raw or "").upper()
+    cleaned = cleaned.translate(_LATIN_TO_CYR)
     return cleaned
+
+
+def canonical_plate_key(plate: str) -> str:
+    """
+    Ключ для сравнения номеров.
+
+    A200MA977 и 200MA977 считаются одним номером:
+    обрезаем первую букву, если дальше идёт 3 цифры + 2 буквы + 2–3 цифры.
+    """
+    p = (plate or "").strip()
+    if len(p) >= 7 and p[0].isalpha() and p[1:4].isdigit() and p[4:6].isalpha():
+        return p[1:]
+    return p
 
 
 def get_region_code(plate: str) -> str | None:
@@ -84,14 +113,18 @@ def find_plates(text: str | None) -> List[str]:
     if not text or not text.strip():
         return []
 
-    seen: set[str] = set()
+    seen_keys: set[str] = set()
     result: List[str] = []
 
     for pattern in ALL_PATTERNS:
         for m in pattern.findall(text):
             normalized = _normalize_plate(m)
-            if _looks_like_plate(normalized) and normalized not in seen:
-                seen.add(normalized)
-                result.append(normalized)
+            if not _looks_like_plate(normalized):
+                continue
+            key = canonical_plate_key(normalized)
+            if key in seen_keys:
+                continue
+            seen_keys.add(key)
+            result.append(normalized)
 
     return result

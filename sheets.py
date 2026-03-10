@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 import config
+from plate_detector import canonical_plate_key, _normalize_plate as _normalize_plate_for_compare
 
 logger = logging.getLogger("sheets")
 
@@ -19,6 +20,8 @@ _append_lock = threading.Lock()
 _next_sheet_row: int | None = None
 
 # Header row for the sheet
+# Колонка H «Отправить»: поставить 1 или «да» — скрипт send_sheet_messages.py отправит сообщение в Telegram.
+# Колонка I «Телефон»: если отправителя нет — можно указать номер (+79...) для поиска в Telegram.
 SHEET_HEADERS = [
     "Номер",
     "Канал",
@@ -27,6 +30,8 @@ SHEET_HEADERS = [
     "Дата",
     "Текст сообщения",
     "Сообщение для клиента",
+    "Отправить",
+    "Телефон",
 ]
 
 # Шаблон сообщения для клиента: {НОМЕР} заменится на найденный номер
@@ -40,6 +45,11 @@ MESSAGE_TEMPLATE = (
 def _client_message(plate: str) -> str:
     """Подставить номер в шаблон сообщения для клиента."""
     return MESSAGE_TEMPLATE.replace("{НОМЕР}", plate)
+
+
+def get_client_message(plate: str) -> str:
+    """Публичная функция: текст сообщения для клиента с подставленным номером."""
+    return _client_message(plate)
 
 
 def _get_client():
@@ -97,13 +107,15 @@ def append_plate_row(row: dict[str, Any]) -> bool:
             if _next_sheet_row is None:
                 col_a = worksheet.col_values(1)
                 if not col_a or all(c.strip() == "" for c in col_a):
-                    worksheet.update("A1:G1", [SHEET_HEADERS], value_input_option="USER_ENTERED")
+                    worksheet.update("A1:I1", [SHEET_HEADERS], value_input_option="USER_ENTERED")
                     _next_sheet_row = 2
                 else:
                     _next_sheet_row = len(col_a) + 1
                 logger.debug("Sheet next row set to %s", _next_sheet_row)
 
-            plate = row.get("plate", "")
+            plate = (row.get("plate", "") or "").strip()
+            if plate:
+                plate = _normalize_plate_for_compare(plate)  # всегда русские буквы в таблице
             values = [
                 plate,
                 row.get("source_channel", ""),
@@ -112,10 +124,12 @@ def append_plate_row(row: dict[str, Any]) -> bool:
                 row.get("date", ""),
                 (row.get("message") or "")[:500],
                 _client_message(plate) if plate and not plate.startswith("[") else "",
+                "",  # Отправить
+                row.get("phone", ""),  # Телефон
             ]
             row_num = _next_sheet_row
             worksheet.update(
-                f"A{row_num}:G{row_num}",
+                f"A{row_num}:I{row_num}",
                 [values],
                 value_input_option="USER_ENTERED",
             )
@@ -128,8 +142,9 @@ def append_plate_row(row: dict[str, Any]) -> bool:
 
 
 def _norm_plate(s: str) -> str:
-    """Нормализация номера для сравнения."""
-    return (s or "").replace(" ", "").replace("-", "").upper().strip()
+    """Нормализация номера для сравнения с учётом русских букв и варианта без первой буквы."""
+    base = _normalize_plate_for_compare(s)
+    return canonical_plate_key(base)
 
 
 def get_existing_plate_links() -> set[tuple[str, str]]:
@@ -155,7 +170,7 @@ def get_existing_plate_links() -> set[tuple[str, str]]:
         logger.warning("Could not read sheet for existing rows: %s", e)
         return set()
     result: set[tuple[str, str]] = set()
-    for row in rows[1:]:  # skip header
+    for row in rows[1:]:
         if len(row) < 3:
             continue
         plate = _norm_plate((row[0] or "").strip())
@@ -194,9 +209,15 @@ def delete_rows_with_plates(plates: set[str]) -> int:
         all_rows = worksheet.get_all_values()
         if len(all_rows) <= 1:
             return 0
-        # Номера в таблице могут быть с пробелами/в разном регистре — нормализуем
+        # Приведём список таргетных номеров к каноническому виду,
+        # чтобы A200MA977 и 200MA977 считались одним номером.
+        norm_target_plates = {
+            canonical_plate_key(_normalize_plate_for_compare(p)) for p in plates
+        }
+
         def norm(s: str) -> str:
-            return (s or "").replace(" ", "").replace("-", "").upper().strip()
+            base = _normalize_plate_for_compare(s)
+            return canonical_plate_key(base)
 
         to_delete: list[int] = []
         for i in range(1, len(all_rows)):
@@ -204,7 +225,7 @@ def delete_rows_with_plates(plates: set[str]) -> int:
             if not row:
                 continue
             plate_cell = norm(row[0])
-            if plate_cell in plates:
+            if plate_cell in norm_target_plates:
                 # gspread: row index 1-based; row 1 = header, data from row 2
                 to_delete.append(i + 1)
         if not to_delete:
